@@ -1,0 +1,543 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Boris AI Main Template - Deploy in Management Account to create organization-wide read-only IAM roles, and the data management role in the data storage account"
+
+Parameters:
+  # Boris Configuration
+  VendorAccountId:
+    Type: String
+    Description: "Boris AI AWS Account ID that the roles trust"
+    AllowedPattern: "^[0-9]{12}$"
+
+  DataStorageAccountId:
+    Type: String
+    Description: "Your AWS Account ID within your AWS organisation dedicated to Boris AI data storage. Leave empty when registering a secondary organization, which holds no Boris data."
+    Default: ""
+    AllowedPattern: "^([0-9]{12})?$"
+
+  ExternalId:
+    Type: String
+    Description: "Your External ID for role assumption"
+    MinLength: 8
+    MaxLength: 64
+    AllowedPattern: "[a-zA-Z0-9-]+"
+
+  ReadOnlyRoleName:
+    Type: String
+    Description: "Name for the Boris AI read-only IAM role"
+    Default: "boris-ai-readonly"
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: "[a-zA-Z0-9+=,.@_-]+"
+
+  # Passed in rather than derived from where this stack runs. IAM is global: a
+  # StackSet instance's region only decides where its stack is managed, not
+  # where its roles are usable.
+  Region:
+    Type: String
+    Description: "Region where B.O.R.I.S stores your data. Every StackSet instance deploys there"
+    AllowedValues:
+      - eu-central-1
+      - us-east-1
+
+  OrganizationalUnitIds:
+    Type: CommaDelimitedList
+    Description: "Organizational unit ids (ou-...) or the organization root id (r-...) the read-only StackSet deploys to"
+
+  OrganizationRootId:
+    Type: String
+    Description: "Organization root id (r-...). The data management role is pinned to the data storage account under the root, so moving that account between OUs never removes it"
+    AllowedPattern: "^r-[0-9a-z]{4,32}$"
+
+Conditions:
+  HasDataStorageAccount: !Not [!Equals [!Ref DataStorageAccountId, ""]]
+
+Resources:
+  # Read-only role for management account (StackSet only deploys to member accounts)
+  BorisAiAgentReadOnlyRoleManagementAccount:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Ref ReadOnlyRoleName
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${VendorAccountId}:root"
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/ReadOnlyAccess"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/SecurityAudit"
+      Policies:
+        - PolicyName: BorisAiEksKubernetesApiAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EksKubernetesApiRead
+                Effect: Allow
+                Action:
+                  - eks:AccessKubernetesApi
+                Resource: "*"
+              - Sid: EksMcpReadOnlyAccess
+                Effect: Allow
+                Action:
+                  - eks-mcp:InvokeMcp
+                  - eks-mcp:CallReadOnlyTool
+                Resource: "*"
+        # Explicit Deny on data-plane reads. ReadOnlyAccess/SecurityAudit grant
+        # broad read access including the bytes inside customer datastores; this
+        # Deny overrides those Allows so Boris AI is limited to the control plane.
+        # Resource metadata/listing (Describe*/List*) stays allowed; only the
+        # value/content actions are denied.
+        - PolicyName: BorisAiDataPlaneDeny
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DenyDataPlaneReads
+                Effect: Deny
+                Action:
+                  # S3 object content
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetObjectTorrent
+                  - s3:GetObjectVersionTorrent
+                  # SSM parameter values (history also returns the value)
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                  - ssm:GetParameterHistory
+                  # DynamoDB item data (incl. Streams) and full-table export
+                  - dynamodb:GetItem
+                  - dynamodb:BatchGetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:PartiQLSelect
+                  - dynamodb:GetRecords
+                  - dynamodb:ExportTableToPointInTime
+                  # Secrets Manager secret values
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:BatchGetSecretValue
+                  # Kinesis stream records
+                  - kinesis:GetRecords
+                  - kinesis:SubscribeToShard
+                  # RDS Data API (Aurora Serverless) query results
+                  - rds-data:ExecuteStatement
+                  - rds-data:BatchExecuteStatement
+                  - rds-data:ExecuteSql
+                  # Redshift Data API query results + cluster credential minting
+                  - redshift-data:ExecuteStatement
+                  - redshift-data:BatchExecuteStatement
+                  - redshift-data:GetStatementResult
+                  - redshift-data:GetStatementResultV2
+                  - redshift:GetClusterCredentials
+                  - redshift:GetClusterCredentialsWithIAM
+                  - redshift-serverless:GetCredentials
+                  # Athena query results
+                  - athena:GetQueryResults
+                  - athena:GetQueryResultsStream
+                  # OpenSearch document reads (provisioned + serverless)
+                  - es:ESHttpGet
+                  - es:ESHttpPost
+                  - aoss:APIAccessAll
+                  # Timestream query results
+                  - timestream:Select
+                  # Keyspaces (Cassandra) row reads
+                  - cassandra:Select
+                  # Neptune graph data
+                  - neptune-db:ReadDataViaQuery
+                  # QLDB ledger data (transactional data API)
+                  - qldb:SendCommand
+                  - qldb:PartiQLSelect
+                  - qldb:GetRevision
+                  - qldb:GetBlock
+                  # AppConfig configuration payloads (legacy + current data API)
+                  - appconfig:GetConfiguration
+                  - appconfigdata:StartConfigurationSession
+                  - appconfigdata:GetLatestConfiguration
+                  # ECR image layer/content pulls
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  # Glacier archive retrieval
+                  - glacier:GetJobOutput
+                  - glacier:InitiateJob
+                  # EC2 instance data side channels
+                  - ec2:GetPasswordData
+                  # CloudWatch Logs masked-field reveal
+                  - logs:Unmask
+                  # SimpleDB (legacy) query
+                  - sdb:Select
+                Resource: "*"
+      Tags:
+        - Key: boris-ai-name
+          Value: !Ref ReadOnlyRoleName
+        - Key: boris-ai-project
+          Value: BorisAI
+        - Key: boris-ai-external-id
+          Value: !Ref ExternalId
+
+  # Boris AI StackSet for organization deployment: the read-only role only.
+  BorisAiStackSet:
+    Type: AWS::CloudFormation::StackSet
+    Properties:
+      StackSetName: !Ref AWS::StackName
+      Description: "Boris AI Organization-level Stack Set. This stack set creates the read-only IAM role in every account of the targeted organizational units"
+      CallAs: "SELF"
+      AutoDeployment:
+        Enabled: true
+        RetainStacksOnAccountRemoval: false
+      PermissionModel: "SERVICE_MANAGED"
+      Capabilities:
+        - CAPABILITY_IAM
+        - CAPABILITY_NAMED_IAM
+      OperationPreferences:
+        ConcurrencyMode: SOFT_FAILURE_TOLERANCE
+        FailureToleranceCount: 0
+        MaxConcurrentPercentage: 25
+        RegionConcurrencyType: PARALLEL
+      StackInstancesGroup:
+        - DeploymentTargets:
+            OrganizationalUnitIds: !Ref OrganizationalUnitIds
+          Regions:
+            - !Ref Region
+      Parameters:
+        - ParameterKey: VendorAccountId
+          ParameterValue: !Ref VendorAccountId
+        - ParameterKey: ExternalId
+          ParameterValue: !Ref ExternalId
+        - ParameterKey: ReadOnlyRoleName
+          ParameterValue: !Ref ReadOnlyRoleName
+      Tags:
+        - Key: boris-ai-project
+          Value: BorisAI
+        - Key: boris-ai-external-id
+          Value: !Ref ExternalId
+      TemplateBody: |
+        AWSTemplateFormatVersion: "2010-09-09"
+        Description: "Boris AI StackSet Template - Deploys the read-only IAM role in target accounts"
+
+        Parameters:
+          VendorAccountId:
+            Type: String
+            Description: "Boris AI AWS Account ID that the roles trust"
+            AllowedPattern: "^[0-9]{12}$"
+
+          ExternalId:
+            Type: String
+            Description: "External ID for role assumption (copy from Boris AI Customer Portal)"
+            MinLength: 8
+            MaxLength: 64
+            AllowedPattern: "[a-zA-Z0-9-]+"
+
+          ReadOnlyRoleName:
+            Type: String
+            Description: "Name for the Boris AI read-only IAM role"
+            Default: "boris-ai-readonly"
+            MinLength: 1
+            MaxLength: 64
+            AllowedPattern: "[a-zA-Z0-9+=,.@_-]+"
+
+        Resources:
+          BorisAiAgentReadOnlyRole:
+            Type: AWS::IAM::Role
+            Properties:
+              RoleName: !Ref ReadOnlyRoleName
+              AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      AWS: !Sub "arn:${AWS::Partition}:iam::${VendorAccountId}:root"
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        sts:ExternalId: !Ref ExternalId
+              ManagedPolicyArns:
+                - !Sub "arn:${AWS::Partition}:iam::aws:policy/ReadOnlyAccess"
+                - !Sub "arn:${AWS::Partition}:iam::aws:policy/SecurityAudit"
+              Policies:
+                - PolicyName: BorisAiEksKubernetesApiAccess
+                  PolicyDocument:
+                    Version: "2012-10-17"
+                    Statement:
+                      - Sid: EksKubernetesApiRead
+                        Effect: Allow
+                        Action:
+                          - eks:AccessKubernetesApi
+                        Resource: "*"
+                      - Sid: EksMcpReadOnlyAccess
+                        Effect: Allow
+                        Action:
+                          - eks-mcp:InvokeMcp
+                          - eks-mcp:CallReadOnlyTool
+                        Resource: "*"
+                # Explicit Deny on data-plane reads. ReadOnlyAccess/SecurityAudit grant
+                # broad read access including the bytes inside customer datastores; this
+                # Deny overrides those Allows so Boris AI is limited to the control plane.
+                # Resource metadata/listing (Describe*/List*) stays allowed; only the
+                # value/content actions are denied.
+                - PolicyName: BorisAiDataPlaneDeny
+                  PolicyDocument:
+                    Version: "2012-10-17"
+                    Statement:
+                      - Sid: DenyDataPlaneReads
+                        Effect: Deny
+                        Action:
+                          # S3 object content
+                          - s3:GetObject
+                          - s3:GetObjectVersion
+                          - s3:GetObjectTorrent
+                          - s3:GetObjectVersionTorrent
+                          # SSM parameter values (history also returns the value)
+                          - ssm:GetParameter
+                          - ssm:GetParameters
+                          - ssm:GetParametersByPath
+                          - ssm:GetParameterHistory
+                          # DynamoDB item data (incl. Streams) and full-table export
+                          - dynamodb:GetItem
+                          - dynamodb:BatchGetItem
+                          - dynamodb:Query
+                          - dynamodb:Scan
+                          - dynamodb:PartiQLSelect
+                          - dynamodb:GetRecords
+                          - dynamodb:ExportTableToPointInTime
+                          # Secrets Manager secret values
+                          - secretsmanager:GetSecretValue
+                          - secretsmanager:BatchGetSecretValue
+                          # Kinesis stream records
+                          - kinesis:GetRecords
+                          - kinesis:SubscribeToShard
+                          # RDS Data API (Aurora Serverless) query results
+                          - rds-data:ExecuteStatement
+                          - rds-data:BatchExecuteStatement
+                          - rds-data:ExecuteSql
+                          # Redshift Data API query results + cluster credential minting
+                          - redshift-data:ExecuteStatement
+                          - redshift-data:BatchExecuteStatement
+                          - redshift-data:GetStatementResult
+                          - redshift-data:GetStatementResultV2
+                          - redshift:GetClusterCredentials
+                          - redshift:GetClusterCredentialsWithIAM
+                          - redshift-serverless:GetCredentials
+                          # Athena query results
+                          - athena:GetQueryResults
+                          - athena:GetQueryResultsStream
+                          # OpenSearch document reads (provisioned + serverless)
+                          - es:ESHttpGet
+                          - es:ESHttpPost
+                          - aoss:APIAccessAll
+                          # Timestream query results
+                          - timestream:Select
+                          # Keyspaces (Cassandra) row reads
+                          - cassandra:Select
+                          # Neptune graph data
+                          - neptune-db:ReadDataViaQuery
+                          # QLDB ledger data (transactional data API)
+                          - qldb:SendCommand
+                          - qldb:PartiQLSelect
+                          - qldb:GetRevision
+                          - qldb:GetBlock
+                          # AppConfig configuration payloads (legacy + current data API)
+                          - appconfig:GetConfiguration
+                          - appconfigdata:StartConfigurationSession
+                          - appconfigdata:GetLatestConfiguration
+                          # ECR image layer/content pulls
+                          - ecr:GetDownloadUrlForLayer
+                          - ecr:BatchGetImage
+                          # Glacier archive retrieval
+                          - glacier:GetJobOutput
+                          - glacier:InitiateJob
+                          # EC2 instance data side channels
+                          - ec2:GetPasswordData
+                          # CloudWatch Logs masked-field reveal
+                          - logs:Unmask
+                          # SimpleDB (legacy) query
+                          - sdb:Select
+                        Resource: "*"
+              Tags:
+                - Key: boris-ai-name
+                  Value: !Ref ReadOnlyRoleName
+                - Key: boris-ai-project
+                  Value: BorisAI
+                - Key: boris-ai-external-id
+                  Value: !Ref ExternalId
+
+        Outputs:
+          BorisReadOnlyRoleArn:
+            Description: "ARN of the Boris AI readonly role"
+            Value: !GetAtt BorisAiAgentReadOnlyRole.Arn
+            Export:
+              Name: !Sub "${AWS::StackName}-BorisReadOnlyRoleArn"
+
+  # The data management role, in the data storage account only. Its own StackSet,
+  # pinned to that account under the root with auto-deployment off, so neither the
+  # OU targets above nor an OU move can remove it.
+  BorisAiDataStackSet:
+    Type: AWS::CloudFormation::StackSet
+    Condition: HasDataStorageAccount
+    # On an existing install the read-only StackSet update deletes the old
+    # same-named role from the data account; this must run after it.
+    DependsOn: BorisAiStackSet
+    Properties:
+      StackSetName: !Sub "${AWS::StackName}-data"
+      Description: "Boris AI data storage Stack Set. Creates the data management IAM role in the data storage account only"
+      CallAs: "SELF"
+      AutoDeployment:
+        Enabled: false
+      PermissionModel: "SERVICE_MANAGED"
+      Capabilities:
+        - CAPABILITY_IAM
+        - CAPABILITY_NAMED_IAM
+      StackInstancesGroup:
+        - DeploymentTargets:
+            OrganizationalUnitIds:
+              - !Ref OrganizationRootId
+            Accounts:
+              - !Ref DataStorageAccountId
+            AccountFilterType: INTERSECTION
+          Regions:
+            - !Ref Region
+      Parameters:
+        - ParameterKey: VendorAccountId
+          ParameterValue: !Ref VendorAccountId
+        - ParameterKey: ExternalId
+          ParameterValue: !Ref ExternalId
+      Tags:
+        - Key: boris-ai-project
+          Value: BorisAI
+        - Key: boris-ai-external-id
+          Value: !Ref ExternalId
+      TemplateBody: |
+        AWSTemplateFormatVersion: "2010-09-09"
+        Description: "Boris AI data storage StackSet Template - Deploys the data management IAM role in the data storage account"
+
+        Parameters:
+          VendorAccountId:
+            Type: String
+            Description: "Boris AI AWS Account ID that the roles trust"
+            AllowedPattern: "^[0-9]{12}$"
+
+          ExternalId:
+            Type: String
+            Description: "External ID for role assumption (copy from Boris AI Customer Portal)"
+            MinLength: 8
+            MaxLength: 64
+            AllowedPattern: "[a-zA-Z0-9-]+"
+
+        Resources:
+          BorisDataStoragePolicy:
+            Type: AWS::IAM::ManagedPolicy
+            Properties:
+              Description: "Policy for Boris AI S3 Vectors access"
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  - Sid: S3VectorsAccess
+                    Effect: Allow
+                    Action:
+                      - s3vectors:*
+                    Resource: "*"
+
+          # The name is fixed: registration requires this exact role ARN.
+          BorisAiResourcesManagementRole:
+            Type: AWS::IAM::Role
+            Properties:
+              RoleName: boris-ai-resources-management-role
+              AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  - Effect: Allow
+                    Principal:
+                      AWS: !Sub "arn:${AWS::Partition}:iam::${VendorAccountId}:root"
+                    Action: sts:AssumeRole
+                    Condition:
+                      StringEquals:
+                        sts:ExternalId: !Ref ExternalId
+              ManagedPolicyArns:
+                - !Ref BorisDataStoragePolicy
+                - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonDynamoDBFullAccess"
+                - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonS3FullAccess"
+              Tags:
+                - Key: boris-ai-name
+                  Value: boris-ai-resources-management-role
+                - Key: boris-ai-project
+                  Value: BorisAI
+                - Key: boris-ai-external-id
+                  Value: !Ref ExternalId
+
+        Outputs:
+          BorisMemoryRoleArn:
+            Description: "ARN of the Boris memory role"
+            Value: !GetAtt BorisAiResourcesManagementRole.Arn
+            Export:
+              Name: !Sub "${AWS::StackName}-BorisMemoryRoleArn"
+
+Outputs:
+  BorisMainRoleArn:
+    Description: "ARN of the Boris AI main role in management account"
+    Value: !GetAtt BorisAiAgentReadOnlyRoleManagementAccount.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-BorisMainRoleArn"
+
+  BorisReadOnlyRoleManagementAccountArn:
+    Description: "ARN of the Boris AI readonly role in management account"
+    Value: !GetAtt BorisAiAgentReadOnlyRoleManagementAccount.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-BorisReadOnlyRoleManagementAccountArn"
+
+  BorisStackSetId:
+    Description: "ID of the Boris AI StackSet"
+    Value: !Ref BorisAiStackSet
+    Export:
+      Name: !Sub "${AWS::StackName}-BorisStackSetId"
+
+  BorisDataStackSetId:
+    Condition: HasDataStorageAccount
+    Description: "ID of the Boris AI data storage StackSet"
+    Value: !Ref BorisAiDataStackSet
+    Export:
+      Name: !Sub "${AWS::StackName}-BorisDataStackSetId"
+
+  ExternalId:
+    Description: "External ID for role assumption"
+    Value: !Ref ExternalId
+    Export:
+      Name: !Sub "${AWS::StackName}-ExternalId"
+
+  DataStorageAccountId:
+    Condition: HasDataStorageAccount
+    Description: "AWS Account ID for Boris AI data storage"
+    Value: !Ref DataStorageAccountId
+    Export:
+      Name: !Sub "${AWS::StackName}-DataStorageAccountId"
+
+  DataManagementRoleArn:
+    Condition: HasDataStorageAccount
+    Description: "ARN of the data management role in the data storage account"
+    Value: !Sub "arn:${AWS::Partition}:iam::${DataStorageAccountId}:role/boris-ai-resources-management-role"
+
+  ReadOnlyRoleName:
+    Description: "Name of the Boris AI read-only role"
+    Value: !Ref ReadOnlyRoleName
+    Export:
+      Name: !Sub "${AWS::StackName}-ReadOnlyRoleName"
+
+  ResourcesManagementRoleName:
+    Condition: HasDataStorageAccount
+    Description: "Name of the Boris AI resources management role"
+    Value: "boris-ai-resources-management-role"
+    Export:
+      Name: !Sub "${AWS::StackName}-ResourcesManagementRoleName"
+
+  VendorAccountId:
+    Description: "Boris AI AWS Account ID that the roles trust"
+    Value: !Ref VendorAccountId
+    Export:
+      Name: !Sub "${AWS::StackName}-VendorAccountId"
+
+  BorisAIVersion:
+    Description: "Boris AI CloudFormation template version"
+    Value: "1.0.0"
+    Export:
+      Name: !Sub "${AWS::StackName}-BorisAIVersion"

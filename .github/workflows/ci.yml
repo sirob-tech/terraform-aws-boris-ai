@@ -1,0 +1,66 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    name: Terraform fmt + validate + test
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff
+
+      - name: Validate root module
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
+      # Plan-only against a mocked provider, so it needs no AWS credentials.
+      - name: terraform test
+        run: terraform test
+
+      # Examples use the module by relative path, so this catches a break in
+      # the public interface that root validation alone would miss.
+      - name: Validate examples
+        run: |
+          for dir in examples/*/; do
+            echo "==> ${dir}"
+            terraform -chdir="${dir}" init -backend=false -input=false
+            terraform -chdir="${dir}" validate
+          done
+
+  cfn-lint:
+    name: cfn-lint
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      # W3037 flags deny-list actions missing from cfn-lint's catalog; denying an
+      # unknown action is harmless, and the list is pinned by tests/template.tftest.hcl.
+      - name: Lint the template and its nested StackSet templates
+        run: |
+          mkdir -p nested
+          uv run --with pyyaml python3 scripts/extract_nested_templates.py templates/boris-ai.yaml nested
+          uvx cfn-lint --ignore-checks W3037 -- templates/boris-ai.yaml nested/*.yaml
