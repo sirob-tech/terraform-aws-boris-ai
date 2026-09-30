@@ -39,10 +39,8 @@ module "boris_aws" {
   # the data management role; every other account is read-only.
   data_account_id = "444455556666"
 
-  # Register from inside apply instead of running the curl by hand.
-  enable_self_registration = true
-  registration_endpoint    = "https://install.getboris.ai"
-  connection_secret        = var.connection_secret
+  # Registers from inside apply (the default), authenticated by this secret.
+  connection_secret = var.connection_secret
 }
 
 output "organization_id" {

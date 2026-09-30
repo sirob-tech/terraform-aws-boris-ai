@@ -31,16 +31,15 @@ variables {
   region                = "eu-central-1"
   external_id           = "123e4567-e89b-12d3-a456-426614174000"
   active_regions        = ["us-east-1", "eu-central-1", "us-east-1"]
+  connection_secret     = "boris_abcdefghijklmnop_abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
 }
 
 run "primary_org_sends_all_data_fields" {
   command = plan
 
   variables {
-    data_account_id          = "222222222222"
-    enable_self_registration = true
-    registration_endpoint    = "https://install.example.com/"
-    connection_secret        = "boris_abcdefghijklmnop_abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"
+    data_account_id       = "222222222222"
+    registration_endpoint = "https://install.example.com/"
   }
 
   assert {
@@ -70,11 +69,6 @@ run "primary_org_sends_all_data_fields" {
   assert {
     condition     = aws_cloudformation_stack.boris_ai.parameters["OrganizationalUnitIds"] == "r-ab12" && aws_cloudformation_stack.boris_ai.parameters["OrganizationRootId"] == "r-ab12"
     error_message = "With no OUs given, the read-only StackSet must target the organization root."
-  }
-
-  assert {
-    condition     = aws_cloudformation_stack.boris_ai.name == "BorisAI"
-    error_message = "The default stack name must stay BorisAI."
   }
 
   # Every body field must be a trigger, or changing it would silently not re-register.
@@ -162,10 +156,34 @@ run "secondary_org_sends_no_data_fields" {
     condition     = output.data_management_role_arn == null
     error_message = "A secondary organization has no data management role."
   }
+}
+
+run "defaults_self_register_with_fixed_names" {
+  command = plan
 
   assert {
-    condition     = length(terraform_data.register) == 0
-    error_message = "Self-registration is off by default."
+    condition     = length(terraform_data.register) == 1 && terraform_data.register[0].triggers_replace["endpoint"] == "https://install.getboris.ai"
+    error_message = "Self-registration must be on by default, against https://install.getboris.ai."
+  }
+
+  # B.O.R.I.S reads the stack and assumes the role by these exact names.
+  assert {
+    condition     = aws_cloudformation_stack.boris_ai.name == "BorisAI" && aws_cloudformation_stack.boris_ai.parameters["ReadOnlyRoleName"] == "boris-ai-readonly" && output.management_account_role_arn == "arn:aws:iam::111111111111:role/boris-ai-readonly"
+    error_message = "The stack must be BorisAI and the read-only role boris-ai-readonly."
+  }
+}
+
+run "manual_registration_needs_no_secret" {
+  command = plan
+
+  variables {
+    enable_self_registration = false
+    connection_secret        = ""
+  }
+
+  assert {
+    condition     = length(terraform_data.register) == 0 && startswith(output.registration_curl, "curl -X PUT 'https://install.getboris.ai/aws/install/o-abcde12345' ")
+    error_message = "With self-registration off, nothing is sent and registration_curl targets the default endpoint: ${output.registration_curl}"
   }
 }
 
@@ -233,26 +251,6 @@ run "rejects_shell_metacharacter_in_region" {
   expect_failures = [var.active_regions]
 }
 
-run "rejects_quote_in_role_name" {
-  command = plan
-
-  variables {
-    readonly_role_name = "boris'readonly"
-  }
-
-  expect_failures = [var.readonly_role_name]
-}
-
-run "rejects_stack_name_without_boris" {
-  command = plan
-
-  variables {
-    stack_name = "ReadOnlyRoles"
-  }
-
-  expect_failures = [var.stack_name]
-}
-
 run "rejects_non_uuid_external_id" {
   command = plan
 
@@ -267,12 +265,30 @@ run "rejects_truncated_secret" {
   command = plan
 
   variables {
-    enable_self_registration = true
-    registration_endpoint    = "https://install.example.com"
-    connection_secret        = "boris_abcdefghijklmnop_short"
+    connection_secret = "boris_abcdefghijklmnop_short"
   }
 
   expect_failures = [var.connection_secret]
+}
+
+run "rejects_missing_secret_by_default" {
+  command = plan
+
+  variables {
+    connection_secret = ""
+  }
+
+  expect_failures = [var.connection_secret]
+}
+
+run "rejects_empty_endpoint" {
+  command = plan
+
+  variables {
+    registration_endpoint = ""
+  }
+
+  expect_failures = [var.registration_endpoint]
 }
 
 # ---------------------------------------------------------------------------

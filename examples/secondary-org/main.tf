@@ -31,6 +31,9 @@ module "boris_aws" {
 
   # Deploy only to these OUs rather than the whole organization.
   target_organizational_unit_ids = ["ou-ab12-11111111", "ou-ab12-22222222"]
+
+  # Register by hand with the output below instead of from inside apply.
+  enable_self_registration = false
 }
 
 # Run with BORIS_CONNECTION_SECRET exported: terraform output -raw register | sh

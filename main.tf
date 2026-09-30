@@ -7,7 +7,7 @@ data "aws_region" "current" {}
 # One stack, as the CloudFormation-only install had: the management-account role
 # plus the read-only and data StackSets. Terraform only passes parameters.
 resource "aws_cloudformation_stack" "boris_ai" {
-  name          = var.stack_name
+  name          = local.stack_name
   template_body = local.template_body
   capabilities  = ["CAPABILITY_IAM", "CAPABILITY_NAMED_IAM"]
 
@@ -17,7 +17,7 @@ resource "aws_cloudformation_stack" "boris_ai" {
     VendorAccountId       = var.vendor_aws_account_id
     DataStorageAccountId  = local.has_data_account ? var.data_account_id : ""
     ExternalId            = var.external_id
-    ReadOnlyRoleName      = var.readonly_role_name
+    ReadOnlyRoleName      = local.readonly_role_name
     Region                = var.region
     OrganizationalUnitIds = join(",", local.target_ou_ids)
     OrganizationRootId    = local.root_id

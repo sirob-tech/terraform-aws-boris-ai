@@ -34,7 +34,7 @@ output "registration_curl" {
   description = "Manual registration command to run after apply (when enable_self_registration is false). Export BORIS_CONNECTION_SECRET in your shell first; read it with `terraform output -raw`."
   value = format(
     "curl -X PUT '%s/aws/install/%s' -H 'Content-Type: application/json' -H \"Authorization: Bearer $BORIS_CONNECTION_SECRET\" -d '%s'",
-    local.registration_endpoint != "" ? local.registration_endpoint : "https://install.getboris.ai",
+    local.registration_endpoint,
     local.organization_id,
     local.registration_body,
   )

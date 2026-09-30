@@ -13,8 +13,8 @@ resource "terraform_data" "register" {
   })
 
   # Shell-safe by construction, and this roster is what a new body field must be
-  # audited against: endpoint, readonly_role_name, active_regions, region and
-  # data_account_id by variable validation; the org and management
+  # audited against: endpoint, active_regions, region and data_account_id by
+  # variable validation; readonly_role_name is a constant; the org and management
   # account ids are AWS-issued (org id also checked below). The secret arrives only
   # through the environment, never the command string.
   provisioner "local-exec" {

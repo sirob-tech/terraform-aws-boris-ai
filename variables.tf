@@ -39,32 +39,8 @@ variable "external_id" {
 }
 
 # ---------------------------------------------------------------------------
-# The CloudFormation stack
+# Read-only targeting
 # ---------------------------------------------------------------------------
-
-variable "stack_name" {
-  type        = string
-  description = "Name of the CloudFormation stack in the management account, which also names the StackSets. Keep the default unless you are adopting a stack deployed under another name."
-  default     = "BorisAI"
-
-  # B.O.R.I.S finds the stack by a case-insensitive "boris" match on its name.
-  validation {
-    condition     = can(regex("^[A-Za-z][A-Za-z0-9-]{0,122}$", var.stack_name)) && strcontains(lower(var.stack_name), "boris")
-    error_message = "stack_name must be a CloudFormation stack name (letters, digits and hyphens, starting with a letter, at most 123 characters) that contains \"boris\"."
-  }
-}
-
-variable "readonly_role_name" {
-  type        = string
-  description = "Name of the read-only IAM role created in the management account and in every targeted member account."
-  default     = "boris-ai-readonly"
-
-  # IAM's role-name charset minus the comma, which the registration endpoint refuses.
-  validation {
-    condition     = can(regex("^[a-zA-Z0-9+=.@_-]{1,64}$", var.readonly_role_name))
-    error_message = "readonly_role_name must be 1-64 characters from [a-zA-Z0-9+=.@_-]."
-  }
-}
 
 variable "target_organizational_unit_ids" {
   type        = list(string)
@@ -119,35 +95,33 @@ variable "active_regions" {
 
 variable "enable_self_registration" {
   type        = bool
-  description = "When true, the module calls the B.O.R.I.S registration endpoint after the stack is in place (idempotent PUT via local-exec). When false (default), run the registration_curl output yourself."
-  default     = false
+  description = "When true (default), the module calls the B.O.R.I.S registration endpoint after the stack is in place (idempotent PUT via local-exec), which needs connection_secret. Set false to register yourself with the registration_curl output."
+  default     = true
+  nullable    = false
 }
 
 variable "registration_endpoint" {
   type        = string
-  description = "Base URL of the B.O.R.I.S registration endpoint (e.g. https://install.getboris.ai). Required when enable_self_registration is true."
-  default     = ""
+  description = "Base URL of the B.O.R.I.S registration endpoint. Keep the default unless the B.O.R.I.S team gives you another."
+  default     = "https://install.getboris.ai"
+  nullable    = false
 
   validation {
-    condition     = !var.enable_self_registration || length(var.registration_endpoint) > 0
-    error_message = "registration_endpoint is required when enable_self_registration is true."
-  }
-
-  validation {
-    condition     = var.registration_endpoint == "" || can(regex("^https://[A-Za-z0-9.:/_-]+$", var.registration_endpoint))
+    condition     = can(regex("^https://[A-Za-z0-9.:/_-]+$", var.registration_endpoint))
     error_message = "registration_endpoint must be an https:// URL containing only letters, digits, and . : / _ -"
   }
 }
 
 variable "connection_secret" {
   type        = string
-  description = "Per-connection onboarding secret issued by the B.O.R.I.S team, sent as an Authorization: Bearer credential. Required when enable_self_registration is true. It binds to this organization on first use and stays valid, so keep it for re-applies."
+  description = "Per-connection onboarding secret issued by the B.O.R.I.S team, sent as an Authorization: Bearer credential. Required unless enable_self_registration is false. It binds to this organization on first use and stays valid, so keep it for re-applies."
   default     = ""
+  nullable    = false
   sensitive   = true
 
   validation {
     condition     = !var.enable_self_registration || length(var.connection_secret) > 0
-    error_message = "connection_secret is required when enable_self_registration is true. Ask the B.O.R.I.S team to issue one for this organization."
+    error_message = "connection_secret is required because enable_self_registration is on (the default). Ask the B.O.R.I.S team to issue one for this organization, or set enable_self_registration = false and run the registration_curl output yourself."
   }
 
   # Exact shape, so a truncated paste fails at plan instead of as a 401 mid-apply.

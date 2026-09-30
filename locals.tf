@@ -1,6 +1,11 @@
 locals {
   template_body = file("${path.module}/templates/boris-ai.yaml")
 
+  # Not inputs: the B.O.R.I.S backend reads the stack and assumes the read-only
+  # role by these exact names.
+  stack_name         = "BorisAI"
+  readonly_role_name = "boris-ai-readonly"
+
   # Fixed by contract: registration refuses any other data role ARN.
   data_management_role_name = "boris-ai-resources-management-role"
 
@@ -19,13 +24,13 @@ locals {
   active_regions = sort(distinct(var.active_regions))
 
   # Commercial partition only: the endpoint accepts arn:aws: ARNs and nothing else.
-  management_account_role_arn = "arn:aws:iam::${local.management_account_id}:role/${var.readonly_role_name}"
+  management_account_role_arn = "arn:aws:iam::${local.management_account_id}:role/${local.readonly_role_name}"
 
   # Null entries drop out, so a secondary organization sends no data fields at all.
   registration_fields = {
     for k, v in {
       management_account_id       = local.management_account_id
-      readonly_role_name          = var.readonly_role_name
+      readonly_role_name          = local.readonly_role_name
       active_regions              = join(",", local.active_regions)
       vendor_region               = var.region
       org_deployment_region       = var.region

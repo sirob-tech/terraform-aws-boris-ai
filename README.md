@@ -4,17 +4,19 @@ Terraform you run in your own AWS organization's management account to grant
 B.O.R.I.S read-only access across the organization, and — in exactly one
 organization — the data access it needs in your dedicated data account.
 
-You apply it with your own credentials; B.O.R.I.S never receives them. After
-`apply`, a one-line registration call (or optional self-registration) tells
-B.O.R.I.S which organization, roles and regions to use.
+You apply it with your own credentials; B.O.R.I.S never receives them. By
+default `apply` then registers the organization with B.O.R.I.S, telling it which
+organization, roles and regions to use; a one-line manual registration call is
+the alternative.
 
 > **Before you start:** registration is authenticated, so you need a
-> `connection_secret` issued by the B.O.R.I.S team, one per organization. Ask for
+> `connection_secret` issued by the B.O.R.I.S team, one per organization. Plan
+> fails without it unless you set `enable_self_registration = false`. Ask for
 > yours before you apply — see [The connection secret](#the-connection-secret).
 
 ## What it creates
 
-One CloudFormation stack in the management account (`BorisAI` by default). It
+One CloudFormation stack in the management account, named `BorisAI`. It
 holds:
 
 - A **read-only role** in the management account (`boris-ai-readonly`).
@@ -25,7 +27,9 @@ holds:
   `boris-ai-resources-management-role` in your data account and nowhere else.
 
 Every role trusts only the B.O.R.I.S account in your install details and
-requires your customer ID as the `sts:ExternalId`.
+requires your customer ID as the `sts:ExternalId`. The stack and read-only role
+names are fixed, not inputs: B.O.R.I.S finds the stack and assumes the role by
+those names.
 
 ### Region
 
@@ -90,9 +94,9 @@ module "boris_aws" {
   active_regions = ["eu-central-1", "us-east-1"]
 
   data_account_id = "444455556666"
-}
 
-output "register" { value = module.boris_aws.registration_curl }
+  connection_secret = var.connection_secret # supply as TF_VAR_connection_secret
+}
 ```
 
 ### Secondary organizations
@@ -113,6 +117,8 @@ module "boris_aws" {
 
   # Optional: target specific OUs instead of the whole organization.
   target_organizational_unit_ids = ["ou-ab12-11111111"]
+
+  connection_secret = var.connection_secret # this organization's own secret
 }
 ```
 
@@ -122,25 +128,25 @@ instance of this module, applied in that organization's management account.
 
 ### Registering
 
-Read the command with `terraform output -raw`, which prints it ready to run
-(plain `terraform output` shows the quoted form, whose escaped `\"` would be sent
+By default the module sends a `PUT` to
+`https://install.getboris.ai/aws/install/<org_id>` inside `apply`, carrying the
+organization, its roles, `active_regions` and `region`, plus the data account and
+data role for a primary. B.O.R.I.S refuses a `region` that does not match your
+install details. Every body field is a trigger, so changing any of them
+re-registers on the next apply; an unchanged apply sends nothing.
+
+To register by hand instead, set `enable_self_registration = false` (no
+`connection_secret` input needed) and run the `registration_curl` output. Read
+it with `terraform output -raw`, which prints it ready to run (plain
+`terraform output` shows the quoted form, whose escaped `\"` would be sent
 literally):
 
 ```
 export BORIS_CONNECTION_SECRET='boris_...'
-terraform output -raw register
+terraform output -raw register   # with: output "register" { value = module.boris_aws.registration_curl }
 ```
 
-It prints a `curl -X PUT` to `https://install.getboris.ai/aws/install/<org_id>`
-carrying the organization, its roles, `active_regions` and `region`, plus the data
-account and data role for a primary. B.O.R.I.S refuses a `region` that does not
-match your install details.
-
-Or set `enable_self_registration = true`, `registration_endpoint` and
-`connection_secret`, and the module sends the `PUT` inside `apply`. Every body
-field is a trigger, so changing any of them re-registers on the next apply; an
-unchanged apply sends nothing. On the manual path, editing an input updates the
-`registration_curl` output, but nothing is sent until you run it again.
+Editing an input updates the output, but nothing is sent until you run it again.
 
 Self-registration retries 5xx, unexpected redirects and transport failures with
 about four minutes of backoff. Any 4xx fails `apply` immediately: a refused
@@ -155,8 +161,9 @@ clear on its own.
 | `active_regions` | required | Where you run workloads. Scopes what the memory scrape retains; it does not restrict what B.O.R.I.S reads. Sorted and deduplicated before sending. |
 | `target_organizational_unit_ids` | `[]` (the root) | OU IDs (`ou-...`) or the root ID (`r-...`). |
 | `data_account_id` | `null` | Primary organization only. Must be a member account, not the management account. |
-| `readonly_role_name` | `boris-ai-readonly` | Used for the management and member roles alike. |
-| `stack_name` | `BorisAI` | Must contain `boris`, which is how B.O.R.I.S finds the stack. |
+| `connection_secret` | `""` | Required while `enable_self_registration` is on. See [The connection secret](#the-connection-secret). |
+| `enable_self_registration` | `true` | `false` skips the in-apply `PUT`; run the `registration_curl` output instead. |
+| `registration_endpoint` | `https://install.getboris.ai` | Change only if the B.O.R.I.S team gives you another. |
 
 ### The connection secret
 
@@ -203,8 +210,10 @@ StackSets keep their identity.
    ```
 
    Set `target_organizational_unit_ids` to the OUs the instances cover. Use the
-   same `external_id`, `vendor_aws_account_id`, `readonly_role_name` and data
-   account. Two region checks decide whether this is a plain adoption:
+   same `external_id`, `vendor_aws_account_id` and data account. The stack must
+   be named `BorisAI` and its `ReadOnlyRoleName` parameter `boris-ai-readonly`;
+   if either differs, stop and contact the B.O.R.I.S team. Two region checks
+   decide whether this is a plain adoption:
 
    - **The stack must be in `region`.** The module's provider is pinned there
      and cannot import a stack from another region. If yours lives elsewhere,
@@ -217,15 +226,16 @@ StackSets keep their identity.
      create collides with the role not yet deleted, and the StackSet operation
      fails). Contact the B.O.R.I.S team before applying.
 
-2. **Import with self-registration off** (the default):
+2. **Import with self-registration off**: set `enable_self_registration = false`
+   for now, then:
 
    ```bash
    terraform import 'module.boris_aws.aws_cloudformation_stack.boris_ai' BorisAI
    ```
 
 3. **Read the plan.** It must be an in-place **update** of
-   `aws_cloudformation_stack.boris_ai`. If it says *must be replaced*, stop: the
-   stack name differs, and a replacement would delete every role.
+   `aws_cloudformation_stack.boris_ai`. If it says *must be replaced*, stop: a
+   replacement would delete every role.
 
 4. **Preview the stack update as a change set**, then delete it:
 
@@ -252,8 +262,8 @@ StackSets keep their identity.
    data account; the new data StackSet then recreates it there. B.O.R.I.S cannot
    write to your data account for the minutes in between, so pick a quiet window.
 
-6. **Register once**: set `enable_self_registration = true` and apply, or run the
-   `registration_curl` output. The values match your existing registration, so
+6. **Register once**: remove `enable_self_registration = false` and apply, or
+   run the `registration_curl` output. The values match your existing registration, so
    B.O.R.I.S accepts it as a repeat.
 
 7. Tell the B.O.R.I.S team, who confirm your organization collects cleanly.
