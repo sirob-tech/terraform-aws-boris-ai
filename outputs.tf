@@ -39,3 +39,13 @@ output "registration_curl" {
     local.registration_body,
   )
 }
+
+output "eks_kubernetes_groups" {
+  description = "Kubernetes groups to set on the boris-ai-readonly role's EKS access entry in each cluster; eks_rbac_manifest binds them to its read-only ClusterRole."
+  value       = ["boris-readonly"]
+}
+
+output "eks_rbac_manifest" {
+  description = "ClusterRole and ClusterRoleBinding to apply to each EKS cluster: get and list on the kinds AmazonEKSViewPolicy does not cover, for the eks_kubernetes_groups, with no Secret or ConfigMap read."
+  value       = file("${path.module}/manifests/boris-readonly-rbac.yaml")
+}
