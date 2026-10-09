@@ -45,7 +45,8 @@ The read-only role carries `ReadOnlyAccess`, `SecurityAudit`, and the EKS
 Kubernetes-API and EKS MCP read actions. Cost Explorer reads come from
 `ReadOnlyAccess`. Nothing outside the data account can create, change or delete
 anything: there are no SQS, EventBridge or Cost Explorer write permissions in
-this template.
+this template. Inside an EKS cluster, what the role can read is set by the
+cluster's access entry: see [EKS clusters](#eks-clusters).
 
 An explicit **deny on data-plane reads** overrides those allows. Resource
 metadata stays readable; the contents do not. It covers S3 object bodies, SSM
@@ -178,6 +179,64 @@ registration, and your customer identity is derived from it.
   `local-exec` only through the environment, and the `registration_curl` output
   references `$BORIS_CONNECTION_SECRET` rather than the value. A saved plan file
   does record it: treat plan artifacts as secret-bearing.
+
+## EKS clusters
+
+The module creates no EKS access entry; each cluster B.O.R.I.S reads needs one
+for `boris-ai-readonly` in that cluster's account, with `AmazonEKSViewPolicy` at
+cluster scope and the Kubernetes groups from the `eks_kubernetes_groups` output,
+`["boris-readonly"]`:
+
+```hcl
+resource "aws_eks_access_entry" "boris" {
+  cluster_name      = "my-cluster"
+  principal_arn     = "arn:aws:iam::444455556666:role/boris-ai-readonly"
+  kubernetes_groups = ["boris-readonly"]
+}
+
+resource "aws_eks_access_policy_association" "boris" {
+  cluster_name  = aws_eks_access_entry.boris.cluster_name
+  principal_arn = aws_eks_access_entry.boris.principal_arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSViewPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+}
+```
+
+With the AWS CLI, pass `--kubernetes-groups boris-readonly` to
+`create-access-entry`, or to `update-access-entry` for an existing entry.
+
+Then apply the module's RBAC manifest to the cluster, from the module source or
+from the `eks_rbac_manifest` output re-exported by your root module:
+
+```bash
+kubectl apply -f .terraform/modules/boris_aws/manifests/boris-readonly-rbac.yaml
+```
+
+It binds the `boris-readonly` group to a `boris-readonly` ClusterRole that
+grants `get`, `list` and `watch` on exactly the resources below, which
+`AmazonEKSViewPolicy` does not cover. It names no wildcard and never Secrets or
+ConfigMaps. `AmazonEKSAdminViewPolicy` would cover these too, but it reads
+Secrets, so it is not used.
+
+| API group | Resources |
+|---|---|
+| core (`""`) | `nodes`, `persistentvolumes` |
+| `storage.k8s.io` | `storageclasses` |
+| `rbac.authorization.k8s.io` | `roles`, `rolebindings`, `clusterroles`, `clusterrolebindings` |
+| `admissionregistration.k8s.io` | `mutatingwebhookconfigurations`, `validatingwebhookconfigurations` |
+| `elbv2.k8s.aws`, `eks.amazonaws.com` | `targetgroupbindings` |
+| `vpcresources.k8s.aws` | `securitygrouppolicies` |
+| `crd.k8s.amazonaws.com` | `eniconfigs` |
+| `external-secrets.io` | `externalsecrets`, `secretstores`, `clustersecretstores` |
+| `karpenter.sh` | `nodepools` |
+| `karpenter.k8s.aws` | `ec2nodeclasses` |
+| `gateway.networking.k8s.io` | `gateways`, `httproutes` |
+
+A rule for a CRD that is not installed grants nothing until it is. Without the
+manifest, B.O.R.I.S skips these kinds and reads the rest of the cluster.
 
 ## Prerequisites
 

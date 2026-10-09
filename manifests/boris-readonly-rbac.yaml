@@ -1,0 +1,54 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: boris-readonly
+rules:
+  - apiGroups: [""]
+    resources: [nodes, persistentvolumes]
+    verbs: [get, list, watch]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings, clusterroles, clusterrolebindings]
+    verbs: [get, list, watch]
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [mutatingwebhookconfigurations, validatingwebhookconfigurations]
+    verbs: [get, list, watch]
+  - apiGroups: [elbv2.k8s.aws]
+    resources: [targetgroupbindings]
+    verbs: [get, list, watch]
+  - apiGroups: [eks.amazonaws.com]
+    resources: [targetgroupbindings]
+    verbs: [get, list, watch]
+  - apiGroups: [vpcresources.k8s.aws]
+    resources: [securitygrouppolicies]
+    verbs: [get, list, watch]
+  - apiGroups: [crd.k8s.amazonaws.com]
+    resources: [eniconfigs]
+    verbs: [get, list, watch]
+  - apiGroups: [external-secrets.io]
+    resources: [externalsecrets, secretstores, clustersecretstores]
+    verbs: [get, list, watch]
+  - apiGroups: [karpenter.sh]
+    resources: [nodepools]
+    verbs: [get, list, watch]
+  - apiGroups: [karpenter.k8s.aws]
+    resources: [ec2nodeclasses]
+    verbs: [get, list, watch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gateways, httproutes]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: boris-readonly
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: boris-readonly
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: boris-readonly

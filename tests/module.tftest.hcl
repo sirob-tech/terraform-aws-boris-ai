@@ -187,6 +187,59 @@ run "manual_registration_needs_no_secret" {
   }
 }
 
+run "eks_rbac_manifest_grants_only_named_reads" {
+  command = plan
+
+  assert {
+    condition     = output.eks_kubernetes_groups == ["boris-readonly"]
+    error_message = "Unexpected eks_kubernetes_groups: ${jsonencode(output.eks_kubernetes_groups)}"
+  }
+
+  assert {
+    condition     = [for d in split("\n---\n", output.eks_rbac_manifest) : "${yamldecode(d).kind}/${yamldecode(d).metadata.name}"] == ["ClusterRole/boris-readonly", "ClusterRoleBinding/boris-readonly"]
+    error_message = "The manifest must hold exactly the boris-readonly ClusterRole and ClusterRoleBinding."
+  }
+
+  assert {
+    condition = { for r in yamldecode(split("\n---\n", output.eks_rbac_manifest)[0]).rules : one(r.apiGroups) => r.resources } == {
+      ""                             = ["nodes", "persistentvolumes"]
+      "storage.k8s.io"               = ["storageclasses"]
+      "rbac.authorization.k8s.io"    = ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]
+      "admissionregistration.k8s.io" = ["mutatingwebhookconfigurations", "validatingwebhookconfigurations"]
+      "elbv2.k8s.aws"                = ["targetgroupbindings"]
+      "eks.amazonaws.com"            = ["targetgroupbindings"]
+      "vpcresources.k8s.aws"         = ["securitygrouppolicies"]
+      "crd.k8s.amazonaws.com"        = ["eniconfigs"]
+      "external-secrets.io"          = ["externalsecrets", "secretstores", "clustersecretstores"]
+      "karpenter.sh"                 = ["nodepools"]
+      "karpenter.k8s.aws"            = ["ec2nodeclasses"]
+      "gateway.networking.k8s.io"    = ["gateways", "httproutes"]
+    }
+    error_message = "The ClusterRole's resources drifted from the reviewed set."
+  }
+
+  assert {
+    condition     = alltrue([for r in yamldecode(split("\n---\n", output.eks_rbac_manifest)[0]).rules : r.verbs == ["get", "list", "watch"] && length(keys(r)) == 3])
+    error_message = "Every rule must grant get, list and watch only, with no resourceNames or nonResourceURLs."
+  }
+
+  assert {
+    condition     = length(setintersection(flatten([for r in yamldecode(split("\n---\n", output.eks_rbac_manifest)[0]).rules : concat(r.apiGroups, r.resources, r.verbs)]), ["*", "secrets", "configmaps"])) == 0
+    error_message = "The ClusterRole must not grant a wildcard, Secrets or ConfigMaps."
+  }
+
+  assert {
+    condition = yamldecode(split("\n---\n", output.eks_rbac_manifest)[1]) == {
+      apiVersion = "rbac.authorization.k8s.io/v1"
+      kind       = "ClusterRoleBinding"
+      metadata   = { name = "boris-readonly" }
+      roleRef    = { apiGroup = "rbac.authorization.k8s.io", kind = "ClusterRole", name = "boris-readonly" }
+      subjects   = [{ apiGroup = "rbac.authorization.k8s.io", kind = "Group", name = "boris-readonly" }]
+    }
+    error_message = "The ClusterRoleBinding must bind the boris-readonly ClusterRole to the boris-readonly group only."
+  }
+}
+
 # ---------------------------------------------------------------------------
 # Input validation
 # ---------------------------------------------------------------------------
