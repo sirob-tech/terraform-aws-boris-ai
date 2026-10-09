@@ -46,6 +46,6 @@ output "eks_kubernetes_groups" {
 }
 
 output "eks_rbac_manifest" {
-  description = "ClusterRole and ClusterRoleBinding to apply to each EKS cluster: get, list and watch on the kinds AmazonEKSViewPolicy does not cover, for the eks_kubernetes_groups, with no Secret or ConfigMap read."
+  description = "ClusterRole and ClusterRoleBinding to apply to each EKS cluster: get and list on the kinds AmazonEKSViewPolicy does not cover, for the eks_kubernetes_groups, with no Secret or ConfigMap read."
   value       = file("${path.module}/manifests/boris-readonly-rbac.yaml")
 }

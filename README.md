@@ -216,7 +216,7 @@ kubectl apply -f .terraform/modules/boris_aws/manifests/boris-readonly-rbac.yaml
 ```
 
 It binds the `boris-readonly` group to a `boris-readonly` ClusterRole that
-grants `get`, `list` and `watch` on exactly the resources below, which
+grants `get` and `list` on exactly the resources below, which
 `AmazonEKSViewPolicy` does not cover. It names no wildcard and never Secrets or
 ConfigMaps. `AmazonEKSAdminViewPolicy` would cover these too, but it reads
 Secrets, so it is not used.
@@ -230,10 +230,14 @@ Secrets, so it is not used.
 | `elbv2.k8s.aws`, `eks.amazonaws.com` | `targetgroupbindings` |
 | `vpcresources.k8s.aws` | `securitygrouppolicies` |
 | `crd.k8s.amazonaws.com` | `eniconfigs` |
-| `external-secrets.io` | `externalsecrets`, `secretstores`, `clustersecretstores` |
 | `karpenter.sh` | `nodepools` |
-| `karpenter.k8s.aws` | `ec2nodeclasses` |
 | `gateway.networking.k8s.io` | `gateways`, `httproutes` |
+
+Kinds whose objects can carry secret material in plain fields are left out on
+purpose, even though B.O.R.I.S could model them: the External Secrets
+`ExternalSecret`, `SecretStore` and `ClusterSecretStore` (templates and provider
+configuration) and Karpenter's `EC2NodeClass` (`userData`). There is no `watch`:
+B.O.R.I.S lists and reads, and never streams.
 
 A rule for a CRD that is not installed grants nothing until it is. Without the
 manifest, B.O.R.I.S skips these kinds and reads the rest of the cluster.

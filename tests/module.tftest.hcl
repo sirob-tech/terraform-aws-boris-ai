@@ -210,22 +210,20 @@ run "eks_rbac_manifest_grants_only_named_reads" {
       "eks.amazonaws.com"            = ["targetgroupbindings"]
       "vpcresources.k8s.aws"         = ["securitygrouppolicies"]
       "crd.k8s.amazonaws.com"        = ["eniconfigs"]
-      "external-secrets.io"          = ["externalsecrets", "secretstores", "clustersecretstores"]
       "karpenter.sh"                 = ["nodepools"]
-      "karpenter.k8s.aws"            = ["ec2nodeclasses"]
       "gateway.networking.k8s.io"    = ["gateways", "httproutes"]
     }
     error_message = "The ClusterRole's resources drifted from the reviewed set."
   }
 
   assert {
-    condition     = alltrue([for r in yamldecode(split("\n---\n", output.eks_rbac_manifest)[0]).rules : r.verbs == ["get", "list", "watch"] && length(keys(r)) == 3])
-    error_message = "Every rule must grant get, list and watch only, with no resourceNames or nonResourceURLs."
+    condition     = alltrue([for r in yamldecode(split("\n---\n", output.eks_rbac_manifest)[0]).rules : r.verbs == ["get", "list"] && length(keys(r)) == 3])
+    error_message = "Every rule must grant get and list only, with no resourceNames or nonResourceURLs."
   }
 
   assert {
-    condition     = length(setintersection(flatten([for r in yamldecode(split("\n---\n", output.eks_rbac_manifest)[0]).rules : concat(r.apiGroups, r.resources, r.verbs)]), ["*", "secrets", "configmaps"])) == 0
-    error_message = "The ClusterRole must not grant a wildcard, Secrets or ConfigMaps."
+    condition     = length(setintersection(flatten([for r in yamldecode(split("\n---\n", output.eks_rbac_manifest)[0]).rules : concat(r.apiGroups, r.resources, r.verbs)]), ["*", "watch", "secrets", "configmaps", "external-secrets.io", "ec2nodeclasses"])) == 0
+    error_message = "The ClusterRole must not grant a wildcard, watch, Secrets, ConfigMaps, the External Secrets kinds or EC2NodeClasses."
   }
 
   assert {
