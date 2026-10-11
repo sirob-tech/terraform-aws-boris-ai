@@ -1,0 +1,48 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: boris-readonly
+rules:
+  - apiGroups: [""]
+    resources: [nodes, persistentvolumes]
+    verbs: [get, list]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [roles, rolebindings, clusterroles, clusterrolebindings]
+    verbs: [get, list]
+  - apiGroups: [admissionregistration.k8s.io]
+    resources: [mutatingwebhookconfigurations, validatingwebhookconfigurations]
+    verbs: [get, list]
+  - apiGroups: [elbv2.k8s.aws]
+    resources: [targetgroupbindings]
+    verbs: [get, list]
+  - apiGroups: [eks.amazonaws.com]
+    resources: [targetgroupbindings]
+    verbs: [get, list]
+  - apiGroups: [vpcresources.k8s.aws]
+    resources: [securitygrouppolicies]
+    verbs: [get, list]
+  - apiGroups: [crd.k8s.amazonaws.com]
+    resources: [eniconfigs]
+    verbs: [get, list]
+  - apiGroups: [karpenter.sh]
+    resources: [nodepools]
+    verbs: [get, list]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gateways, httproutes]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: boris-readonly
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: boris-readonly
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: boris-readonly
