@@ -90,3 +90,7 @@ output "data_stackset_regions" {
 output "region_outputs" {
   value = length(regexall("DeploymentRegion|AWS::Region", local.body))
 }
+
+output "stackset_marketplace_tags" {
+  value = length(regexall("- Key: aws-apn-id-471354728099\\n\\s*Value: \"pc:8wgsultfts990n33osdm7z7p8\"", local.body))
+}

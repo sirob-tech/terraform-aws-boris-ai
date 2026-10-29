@@ -31,6 +31,10 @@ requires your customer ID as the `sts:ExternalId`. The stack and read-only role
 names are fixed, not inputs: B.O.R.I.S finds the stack and assumes the role by
 those names.
 
+The stack, both StackSets and what they create carry the tag
+`aws-apn-id-471354728099 = pc:8wgsultfts990n33osdm7z7p8`. AWS uses it to
+attribute usage to the B.O.R.I.S AWS Marketplace listing. It grants nothing.
+
 ### Region
 
 `region` is where B.O.R.I.S stores your data: `eu-central-1` or `us-east-1`, as

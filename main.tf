@@ -23,8 +23,11 @@ resource "aws_cloudformation_stack" "boris_ai" {
     OrganizationRootId    = local.root_id
   }
 
+  # CloudFormation copies stack tags onto the resources it creates. The aws-apn-id
+  # key attributes them to the B.O.R.I.S AWS Marketplace listing.
   tags = {
-    boris-ai-project = "BorisAI"
+    boris-ai-project          = "BorisAI"
+    "aws-apn-id-471354728099" = "pc:8wgsultfts990n33osdm7z7p8"
   }
 
   # StackSet operations across a large organization outlast the 30m default.
