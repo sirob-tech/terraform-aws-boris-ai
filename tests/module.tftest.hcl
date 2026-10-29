@@ -171,6 +171,11 @@ run "defaults_self_register_with_fixed_names" {
     condition     = aws_cloudformation_stack.boris_ai.name == "BorisAI" && aws_cloudformation_stack.boris_ai.parameters["ReadOnlyRoleName"] == "boris-ai-readonly" && output.management_account_role_arn == "arn:aws:iam::111111111111:role/boris-ai-readonly"
     error_message = "The stack must be BorisAI and the read-only role boris-ai-readonly."
   }
+
+  assert {
+    condition     = aws_cloudformation_stack.boris_ai.tags["aws-apn-id-471354728099"] == "pc:8wgsultfts990n33osdm7z7p8"
+    error_message = "The stack must carry the AWS Marketplace tag, which CloudFormation copies onto its resources."
+  }
 }
 
 run "manual_registration_needs_no_secret" {

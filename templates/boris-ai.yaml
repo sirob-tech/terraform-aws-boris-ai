@@ -213,6 +213,9 @@ Resources:
           Value: BorisAI
         - Key: boris-ai-external-id
           Value: !Ref ExternalId
+        # AWS Marketplace attribution; StackSet tags reach every stack instance and its role.
+        - Key: aws-apn-id-471354728099
+          Value: "pc:8wgsultfts990n33osdm7z7p8"
       TemplateBody: |
         AWSTemplateFormatVersion: "2010-09-09"
         Description: "Boris AI StackSet Template - Deploys the read-only IAM role in target accounts"
@@ -408,6 +411,9 @@ Resources:
           Value: BorisAI
         - Key: boris-ai-external-id
           Value: !Ref ExternalId
+        # AWS Marketplace attribution; StackSet tags reach every stack instance and its role.
+        - Key: aws-apn-id-471354728099
+          Value: "pc:8wgsultfts990n33osdm7z7p8"
       TemplateBody: |
         AWSTemplateFormatVersion: "2010-09-09"
         Description: "Boris AI data storage StackSet Template - Deploys the data management IAM role in the data storage account"
@@ -538,6 +544,6 @@ Outputs:
 
   BorisAIVersion:
     Description: "Boris AI CloudFormation template version"
-    Value: "1.0.0"
+    Value: "1.1.0"
     Export:
       Name: !Sub "${AWS::StackName}-BorisAIVersion"

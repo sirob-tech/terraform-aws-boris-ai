@@ -110,6 +110,11 @@ run "template_facts" {
     error_message = "The template exposes a region (DeploymentRegion or AWS::Region); regions come from the module, not the stack."
   }
 
+  assert {
+    condition     = output.stackset_marketplace_tags == 2
+    error_message = "Both StackSets must carry the AWS Marketplace tag."
+  }
+
   # CloudFormation's inline template_body limit.
   assert {
     condition     = output.size_bytes <= 51200
